@@ -9,7 +9,7 @@ import {
     LayoutDashboard, Target, MessageSquare, TrendingUp, AlertTriangle, 
     CheckCircle, Wallet, BrainCircuit, ChevronRight, Play, Send, User, Sparkles, Check, Globe,
     Plus, Clock, ArrowUp, PanelLeft, Share, ShieldAlert, Trash2, Search, BarChart3, Coins, Rocket,
-    ChevronLeft, ChevronDown, Info, Activity, DollarSign, LogOut, ArrowRight
+    ChevronLeft, ChevronDown, Info, Activity, DollarSign, LogOut, ArrowRight, RefreshCw, WifiOff
 } from 'lucide-react';
 import { BusinessHealthDiagram, SurvivalChartDiagram } from './Diagrams';
 
@@ -58,19 +58,100 @@ const DEFAULT_AI_DATA: AIAnalysisResult = {
     demandRisk: 50,
     marketRisk: 50,
     efficiencyRisk: 50,
-    financialMetrics: { burnRate: "Calculating...", quickRatio: "--", debtToEquity: "--" },
+    financialMetrics: { burnRate: "--", quickRatio: "--", debtToEquity: "--" },
     survivalProbabilities: { days15: 50, days30: 50, days60: 50 },
-    warnings: ["Insufficient data for accurate prediction."],
-    improvements: ["Please retry the analysis."],
-    pricingStrategy: "Analysis pending...",
+    warnings: ["System requires analysis refresh."],
+    improvements: ["Click 'Retry Analysis' to generate data."],
+    pricingStrategy: "Pending Analysis...",
     marketingStrategy: [],
     dailyTasks: [],
     marketAnalysis: {
-        marketSize: "Unknown",
+        marketSize: "--",
         growthTrends: [],
         keyCompetitors: []
     },
     businessIdeas: []
+};
+
+// --- Fallback Data Generator (The Safety Net) ---
+const generateFallbackData = (data: Record<string, string>, type: 'idea' | 'running'): AIAnalysisResult => {
+    const revenue = parseFloat(data.revenue || "0");
+    const expenses = parseFloat(data.expenses || "0");
+    const capital = parseFloat(data.capital || "0");
+    const industry = data.industry || data.industryInterest || "General Business";
+    
+    // Heuristic Calculations
+    let health = 70;
+    let finRisk = 30;
+    
+    if (type === 'running') {
+        const isProfitable = revenue > expenses;
+        health = isProfitable ? 82 : 45;
+        finRisk = isProfitable ? 20 : 85;
+    } else {
+        health = capital > 5000 ? 75 : 60;
+        finRisk = capital > 5000 ? 30 : 60;
+    }
+
+    return {
+        healthScore: health,
+        financialRisk: finRisk,
+        demandRisk: 40,
+        marketRisk: 45,
+        efficiencyRisk: 35,
+        financialMetrics: {
+            burnRate: type === 'running' ? `$${Math.abs(revenue - expenses).toLocaleString()}/mo` : `$2,500/mo (Est.)`,
+            quickRatio: type === 'running' ? (revenue > 0 ? (revenue / (expenses || 1)).toFixed(2) : "0.5") : "1.2",
+            debtToEquity: "0.4"
+        },
+        survivalProbabilities: { 
+            days15: Math.min(95, health + 10), 
+            days30: Math.min(90, health), 
+            days60: Math.min(80, health - 10) 
+        },
+        warnings: type === 'running' && expenses > revenue 
+            ? ["Expenses exceed revenue (Immediate Action Required)", "Cash runway critically short"]
+            : ["Market saturation increasing in " + industry, "Customer acquisition costs rising"],
+        improvements: [
+            "Optimize pricing model to increase margins by 15%",
+            "Implement automated email retargeting for leads",
+            "Reduce operational overhead in supply chain"
+        ],
+        pricingStrategy: "Adopt a value-based pricing tier. Your current segment allows for a 10-15% premium if bundled with high-touch service.",
+        marketingStrategy: [
+            "LinkedIn thought leadership for B2B trust",
+            "SEO focusing on 'high intent' keywords",
+            "Strategic partnerships with complementary vendors"
+        ],
+        dailyTasks: [
+            "Review weekly cash flow statement",
+            "Contact 5 potential high-value leads",
+            "Analyze competitor pricing changes"
+        ],
+        marketAnalysis: {
+            marketSize: "Growing at 8.5% CAGR",
+            growthTrends: [
+                { trend: "Digital Transformation", insight: "Shift towards automated service delivery." },
+                { trend: "Sustainability", insight: "Customers paying premium for eco-friendly options." }
+            ],
+            keyCompetitors: [
+                { 
+                    name: "Market Leader Inc.", 
+                    swot: { 
+                        strengths: ["Brand Recognition", "Capital"], 
+                        weaknesses: ["Slow Support", "Legacy Tech"], 
+                        opportunities: ["Niche Targeting", "Better UI"], 
+                        threats: ["Price War"] 
+                    } 
+                }
+            ]
+        },
+        businessIdeas: [
+            { name: "Subscription Model", investment: "$5,000", profit: "$8,000/mo" },
+            { name: "Consulting Service", investment: "$1,000", profit: "$12,000/mo" },
+            { name: "Digital Product", investment: "$2,500", profit: "$5,000/mo" }
+        ]
+    };
 };
 
 // --- Helper Components ---
@@ -259,18 +340,18 @@ const callOpenRouter = async (messages: any[], temperature: number = 0.7) => {
                 "messages": messages,
                 "temperature": temperature,
                 "top_p": 0.9,
-                "max_tokens": 3000
+                "max_tokens": 1024 // Reduced max tokens for stability
             })
         });
 
         if (!response.ok) {
-            throw new Error(`OpenRouter API Error: ${response.statusText}`);
+            throw new Error(`API Error: ${response.status}`);
         }
 
         const data = await response.json();
-        return data.choices[0]?.message?.content || "";
+        return data.choices?.[0]?.message?.content || "";
     } catch (error) {
-        console.error("OpenRouter Call Failed:", error);
+        console.warn("OpenRouter API call failed (using fallback):", error);
         throw error;
     }
 };
@@ -279,6 +360,7 @@ const callOpenRouter = async (messages: any[], temperature: number = 0.7) => {
 export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogout }) => {
     const [view, setView] = useState<'overview' | 'strategy' | 'mentor'>('overview');
     const [loading, setLoading] = useState(true);
+    const [usingFallback, setUsingFallback] = useState(false);
     const [statusText, setStatusText] = useState("Initializing AI Core...");
     const [aiData, setAiData] = useState<AIAnalysisResult | null>(null);
     const [chatHistory, setChatHistory] = useState<{role: 'user' | 'model', text: string}[]>([]);
@@ -287,139 +369,79 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
     
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    const generateAnalysis = async () => {
+        setLoading(true);
+        setUsingFallback(false);
+        
+        try {
+            setStatusText("Aggregating Financial & Market Vectors...");
+            
+            // Simplified prompt structure for Mistral
+            const prompt = [
+                {
+                    role: "system",
+                    content: "You are a JSON generator. Output valid JSON only. No markdown. No intro."
+                },
+                {
+                    role: "user",
+                    content: `Generate a business analysis JSON for a ${userType === 'running' ? 'Running Business' : 'Startup Idea'}.
+                    
+                    Data: ${JSON.stringify(userData)}
+
+                    Required JSON Structure:
+                    {
+                        "healthScore": 75,
+                        "financialRisk": 30,
+                        "warnings": ["warning1", "warning2"],
+                        "improvements": ["imp1", "imp2"],
+                        "pricingStrategy": "strategy text",
+                        "marketingStrategy": ["strategy1", "strategy2"],
+                        "dailyTasks": ["task1", "task2"],
+                        "marketAnalysis": {
+                            "marketSize": "size",
+                            "growthTrends": [{"trend": "t1", "insight": "i1"}],
+                            "keyCompetitors": [{"name": "c1", "swot": {"strengths": ["s1"], "weaknesses": ["w1"], "opportunities": ["o1"], "threats": ["t1"]}}]
+                        },
+                        "financialMetrics": { "burnRate": "val", "quickRatio": "val", "debtToEquity": "val" },
+                        "survivalProbabilities": { "days15": 90, "days30": 80, "days60": 70 },
+                        "businessIdeas": [{"name": "n1", "investment": "v1", "profit": "p1"}]
+                    }`
+                }
+            ];
+
+            const responseText = await callOpenRouter(prompt, 0.3);
+            
+            // Extract JSON from response (finding first { and last })
+            const firstBrace = responseText.indexOf('{');
+            const lastBrace = responseText.lastIndexOf('}');
+            
+            if (firstBrace !== -1 && lastBrace !== -1) {
+                const cleanJson = responseText.substring(firstBrace, lastBrace + 1);
+                const parsedData = JSON.parse(cleanJson);
+                
+                // Merge with default to ensure no missing keys
+                setAiData({
+                    ...DEFAULT_AI_DATA,
+                    ...parsedData,
+                    marketAnalysis: { ...DEFAULT_AI_DATA.marketAnalysis, ...parsedData.marketAnalysis }
+                });
+            } else {
+                throw new Error("Invalid JSON format");
+            }
+
+        } catch (error) {
+            console.warn("Generating fallback analysis due to error:", error);
+            // FAIL-SAFE: Generate local data if API fails
+            const fallback = generateFallbackData(userData, userType);
+            setAiData(fallback);
+            setUsingFallback(true);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // Initial Analysis Effect
     useEffect(() => {
-        const generateAnalysis = async () => {
-            try {
-                // STEP 1: PREPARE DATA
-                setStatusText("Aggregating Financial & Market Vectors...");
-                
-                const jsonStructure = `{
-                    "healthScore": 75,
-                    "financialRisk": 30,
-                    "demandRisk": 20,
-                    "marketRisk": 40,
-                    "efficiencyRisk": 25,
-                    "financialMetrics": {
-                        "burnRate": "$5,000/mo",
-                        "quickRatio": "1.2",
-                        "debtToEquity": "0.5"
-                    },
-                    "survivalProbabilities": { "days15": 95, "days30": 85, "days60": 70 },
-                    "warnings": ["Warning 1", "Warning 2", "Warning 3"],
-                    "improvements": ["Improvement 1", "Improvement 2", "Improvement 3"],
-                    "pricingStrategy": "Value-based pricing...",
-                    "marketingStrategy": ["Tactic 1", "Tactic 2", "Tactic 3"],
-                    "dailyTasks": ["Task 1", "Task 2", "Task 3"],
-                    "marketAnalysis": {
-                        "marketSize": "$10B",
-                        "growthTrends": [{"trend": "Trend Name", "insight": "Why it matters"}],
-                        "keyCompetitors": [{ "name": "Comp 1", "swot": { "strengths": ["S1"], "weaknesses": ["W1"], "opportunities": ["O1"], "threats": ["T1"] } }]
-                    },
-                    "businessIdeas": [{"name": "Idea 1", "investment": "$10k", "profit": "$50k"}]
-                }`;
-
-                // --- SMART PROMPT ENGINEERING ---
-                let systemRole = "You are Ventura AI, a Senior Investment Banker and Data Scientist. Your goal is to provide a ruthless, mathematically grounded assessment of a business.";
-                let scoringRules = "";
-
-                if (userType === 'running') {
-                    scoringRules = `
-                        CRITICAL SCORING RULES FOR RUNNING BUSINESS:
-                        1. **Profitability Check**: If 'revenue' < 'expenses', the 'healthScore' MUST be below 50. This is non-negotiable.
-                        2. **Burn Rate**: Calculate Monthly Burn = Expenses - Revenue (if positive). If Burn > 0, increase 'financialRisk'.
-                        3. **Survival**: If burn rate is high and revenue is low, 'survivalProbabilities.days60' should be very low (< 30%).
-                        4. **Metrics**: Estimate 'burnRate' (Net Cash Flow), 'quickRatio' (Liquid Assets/Liabilities - assume standard ratios if data missing), 'debtToEquity'.
-                    `;
-                } else {
-                    scoringRules = `
-                        CRITICAL SCORING RULES FOR NEW IDEA:
-                        1. **Capital Check**: Compare user's 'capital' against typical startup costs for '${userData.industryInterest || 'this industry'}'. If capital is insufficient, 'healthScore' MUST be below 60.
-                        2. **Vagueness Penalty**: If 'fullDescription' is short or vague, deduct 20 points from 'healthScore'.
-                        3. **Survival**: New startups are risky. 'survivalProbabilities.days60' should rarely exceed 60% unless capital is very high.
-                    `;
-                }
-
-                const prompt = [
-                    {
-                        role: "system",
-                        content: `${systemRole}
-                        
-                        ${scoringRules}
-
-                        OUTPUT FORMAT:
-                        Return ONLY a valid JSON object matching this structure: ${jsonStructure}.
-                        Do NOT use Markdown. Do NOT include explanations outside the JSON.`
-                    },
-                    {
-                        role: "user",
-                        content: `Analyze this profile:
-                        Type: ${userType === 'running' ? "Existing Business" : "New Startup Concept"}
-                        Data: ${JSON.stringify(userData)}
-                        
-                        Task:
-                        1. Perform financial stress test.
-                        2. Identify 3 critical flaws (Warnings).
-                        3. Generate concrete Optimization Protocol (Improvements).
-                        4. Predict survival probability based on the rules above.`
-                    }
-                ];
-
-                setStatusText("Running Probabilistic Survival Models...");
-                
-                // Use lower temperature (0.4) for more analytical/deterministic results
-                const responseText = await callOpenRouter(prompt, 0.4);
-                
-                // Robust JSON Extraction
-                const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-                
-                if (jsonMatch) {
-                    const cleanJson = jsonMatch[0];
-                    try {
-                        const parsedData = JSON.parse(cleanJson);
-                        
-                        // SANITY CHECK: Enforce rules client-side if AI hallucinates
-                        let adjustedScore = parsedData.healthScore;
-                        if (userType === 'running') {
-                             const rev = parseFloat(userData.revenue || "0");
-                             const exp = parseFloat(userData.expenses || "0");
-                             if (exp > rev && adjustedScore > 60) {
-                                 adjustedScore = 45; // Force score down if unprofitable
-                                 parsedData.warnings.unshift("CRITICAL: Expenses exceed Revenue. Immediate burn reduction required.");
-                             }
-                        }
-
-                        const validatedData: AIAnalysisResult = {
-                            ...DEFAULT_AI_DATA,
-                            ...parsedData,
-                            healthScore: adjustedScore,
-                            financialMetrics: { ...DEFAULT_AI_DATA.financialMetrics, ...parsedData.financialMetrics },
-                            marketAnalysis: { 
-                                ...DEFAULT_AI_DATA.marketAnalysis, 
-                                ...parsedData.marketAnalysis,
-                                growthTrends: parsedData.marketAnalysis?.growthTrends || DEFAULT_AI_DATA.marketAnalysis.growthTrends,
-                                keyCompetitors: parsedData.marketAnalysis?.keyCompetitors || DEFAULT_AI_DATA.marketAnalysis.keyCompetitors
-                            },
-                            survivalProbabilities: { ...DEFAULT_AI_DATA.survivalProbabilities, ...parsedData.survivalProbabilities }
-                        };
-                        setAiData(validatedData);
-                    } catch (jsonError) {
-                        console.error("Failed to parse JSON:", cleanJson);
-                        setAiData(DEFAULT_AI_DATA);
-                    }
-                } else {
-                     console.error("No JSON found in response");
-                     setAiData(DEFAULT_AI_DATA);
-                }
-
-            } catch (error) {
-                console.error("Error generating analysis:", error);
-                setAiData(DEFAULT_AI_DATA);
-            } finally {
-                setLoading(false);
-            }
-        };
-
         generateAnalysis();
     }, []);
 
@@ -443,22 +465,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
             const messages = [
                 { 
                     role: "system", 
-                    content: `You are Ventura AI, a helpful business mentor. 
-                    Context: User has a ${userType === 'running' ? 'running business' : 'startup idea'}.
-                    User Data: ${JSON.stringify(userData)}.
-                    Goal: Provide short, actionable business advice. Use **bold** for key terms.` 
+                    content: "You are Ventura AI, a business mentor. Keep answers short and practical." 
                 },
-                ...chatHistory.map(msg => ({ role: msg.role === 'model' ? 'assistant' : 'user', content: msg.text })),
+                ...chatHistory.slice(-4).map(msg => ({ role: msg.role === 'model' ? 'assistant' : 'user', content: msg.text })),
                 { role: "user", content: userMessage }
             ];
 
-            const responseText = await callOpenRouter(messages, 0.7); // Higher temp for chat creativity
+            const responseText = await callOpenRouter(messages, 0.7);
             
             if (responseText) {
                 setChatHistory(prev => [...prev, { role: 'model', text: responseText }]);
             }
         } catch (e) {
-            setChatHistory(prev => [...prev, { role: 'model', text: "I'm having trouble connecting to my brain right now. Please try again." }]);
+            // Chat Fallback
+            setChatHistory(prev => [...prev, { role: 'model', text: "I'm currently operating in offline mode. Based on your profile, I recommend focusing on cash flow stability and customer retention while I reconnect to the main servers." }]);
         } finally {
             setChatLoading(false);
         }
@@ -480,7 +500,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
         );
     }
 
-    if (!aiData) return <div className="p-10 text-center">Error loading analysis. Please refresh.</div>;
+    if (!aiData) return null; // Should never happen due to fallback
 
     const tabVariants = {
         hidden: { opacity: 0, x: 20 },
@@ -533,14 +553,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
                                     {view === 'overview' && "Command Center"}
                                     {view === 'strategy' && "Strategic Blueprint"}
                                 </h1>
-                                <p className="text-stone-500 text-sm">
-                                    {view === 'overview' ? "Real-time business intelligence active." : "AI-Generated Optimization Protocols."}
+                                <p className="text-stone-500 text-sm flex items-center gap-2">
+                                    {usingFallback ? (
+                                        <span className="flex items-center gap-1 text-amber-600"><WifiOff size={12} /> Local Analysis Mode</span>
+                                    ) : (
+                                        view === 'overview' ? "Real-time business intelligence active." : "AI-Generated Optimization Protocols."
+                                    )}
                                 </p>
                             </div>
                             <div className="flex gap-4">
-                                <div className="px-4 py-2 bg-white border border-stone-200 rounded-full shadow-sm text-sm font-medium text-stone-600 flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> 
-                                    <span className="text-xs font-bold tracking-wider uppercase">System Online</span>
+                                <div className={`px-4 py-2 bg-white border border-stone-200 rounded-full shadow-sm text-sm font-medium ${usingFallback ? 'text-amber-600' : 'text-stone-600'} flex items-center gap-2`}>
+                                    <div className={`w-2 h-2 rounded-full ${usingFallback ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`}></div> 
+                                    <span className="text-xs font-bold tracking-wider uppercase">{usingFallback ? 'Offline Mode' : 'System Online'}</span>
                                 </div>
                             </div>
                         </div>
