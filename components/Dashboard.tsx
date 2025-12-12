@@ -342,6 +342,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
         setUsingFallback(false);
         
         try {
+            if (!process.env.API_KEY) {
+                console.warn("API Key missing from build environment. Triggering Offline Mode.");
+                throw new Error("API Key missing");
+            }
+
             setStatusText("Aggregating Financial & Market Vectors...");
             
             // Simplified prompt structure for Gemini
@@ -393,7 +398,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
             }
 
         } catch (error) {
-            console.warn("Switching to Offline Analysis Mode");
+            console.warn("Switching to Offline Analysis Mode:", error);
             // FAIL-SAFE: Generate local data if API fails or key is missing
             const fallback = generateFallbackData(userData, userType);
             setAiData(fallback);
@@ -425,6 +430,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
         setChatLoading(true);
 
         try {
+            if (!process.env.API_KEY) throw new Error("API Key missing");
+
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
             const history = chatHistory.map(msg => ({
@@ -448,7 +455,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
             }
         } catch (e) {
             // Chat Fallback
-            setChatHistory(prev => [...prev, { role: 'model', text: "I'm currently operating in offline mode. Based on your profile, I recommend focusing on cash flow stability and customer retention while I reconnect to the main servers." }]);
+            setChatHistory(prev => [...prev, { role: 'model', text: "I'm currently operating in offline mode. based on your profile, I recommend focusing on cash flow stability and customer retention while I reconnect to the main servers." }]);
         } finally {
             setChatLoading(false);
         }
