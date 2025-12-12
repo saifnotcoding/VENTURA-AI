@@ -12,10 +12,11 @@ import {
     ChevronLeft, ChevronDown, Info, Activity, DollarSign, LogOut, ArrowRight, RefreshCw, WifiOff
 } from 'lucide-react';
 import { BusinessHealthDiagram, SurvivalChartDiagram } from './Diagrams';
-import { GoogleGenAI } from "@google/genai";
 
 // --- Configuration ---
-// API Key is managed via process.env.API_KEY as per GenAI guidelines.
+// API Key is managed via process.env.API_KEY (mapped from VITE_API_KEY in vite.config.ts)
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const AI_MODEL = "mistralai/mistral-7b-instruct:free";
 
 // --- Types ---
 interface DashboardProps {
@@ -71,6 +72,21 @@ const DEFAULT_AI_DATA: AIAnalysisResult = {
         keyCompetitors: []
     },
     businessIdeas: []
+};
+
+// --- Helper: Clean JSON from Markdown ---
+const cleanJsonString = (str: string): string => {
+    // Remove markdown code blocks if present (e.g. ```json ... ```)
+    const jsonMatch = str.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch && jsonMatch[1]) {
+        return jsonMatch[1];
+    }
+    // Remove generic code blocks
+    const codeMatch = str.match(/```\s*([\s\S]*?)\s*```/);
+    if (codeMatch && codeMatch[1]) {
+        return codeMatch[1];
+    }
+    return str;
 };
 
 // --- Fallback Data Generator (The Safety Net) ---
@@ -329,6 +345,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
     const [view, setView] = useState<'overview' | 'strategy' | 'mentor'>('overview');
     const [loading, setLoading] = useState(true);
     const [usingFallback, setUsingFallback] = useState(false);
+    const [isKeyMissing, setIsKeyMissing] = useState(false);
     const [statusText, setStatusText] = useState("Initializing AI Core...");
     const [aiData, setAiData] = useState<AIAnalysisResult | null>(null);
     const [chatHistory, setChatHistory] = useState<{role: 'user' | 'model', text: string}[]>([]);
@@ -340,52 +357,68 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
     const generateAnalysis = async () => {
         setLoading(true);
         setUsingFallback(false);
+        setIsKeyMissing(false);
         
         try {
             if (!process.env.API_KEY) {
                 console.warn("API Key missing from build environment. Triggering Offline Mode.");
+                setIsKeyMissing(true);
                 throw new Error("API Key missing");
             }
 
             setStatusText("Aggregating Financial & Market Vectors...");
             
-            // Simplified prompt structure for Gemini
-            const promptText = `Generate a business analysis JSON for a ${userType === 'running' ? 'Running Business' : 'Startup Idea'}.
+            // Simplified prompt structure for Mistral
+            const promptText = `You are a business expert. Analyze this ${userType === 'running' ? 'Running Business' : 'Startup Idea'}.
                     
-                    Data: ${JSON.stringify(userData)}
+            Data: ${JSON.stringify(userData)}
 
-                    Required JSON Structure:
-                    {
-                        "healthScore": 75,
-                        "financialRisk": 30,
-                        "warnings": ["warning1", "warning2"],
-                        "improvements": ["imp1", "imp2"],
-                        "pricingStrategy": "strategy text",
-                        "marketingStrategy": ["strategy1", "strategy2"],
-                        "dailyTasks": ["task1", "task2"],
-                        "marketAnalysis": {
-                            "marketSize": "size",
-                            "growthTrends": [{"trend": "t1", "insight": "i1"}],
-                            "keyCompetitors": [{"name": "c1", "swot": {"strengths": ["s1"], "weaknesses": ["w1"], "opportunities": ["o1"], "threats": ["t1"]}}]
-                        },
-                        "financialMetrics": { "burnRate": "val", "quickRatio": "val", "debtToEquity": "val" },
-                        "survivalProbabilities": { "days15": 90, "days30": 80, "days60": 70 },
-                        "businessIdeas": [{"name": "n1", "investment": "v1", "profit": "p1"}]
-                    }`;
+            Return ONLY valid JSON with this exact structure (no markdown, no extra text):
+            {
+                "healthScore": 75,
+                "financialRisk": 30,
+                "warnings": ["warning1", "warning2"],
+                "improvements": ["imp1", "imp2"],
+                "pricingStrategy": "strategy text",
+                "marketingStrategy": ["strategy1", "strategy2"],
+                "dailyTasks": ["task1", "task2"],
+                "marketAnalysis": {
+                    "marketSize": "size",
+                    "growthTrends": [{"trend": "t1", "insight": "i1"}],
+                    "keyCompetitors": [{"name": "c1", "swot": {"strengths": ["s1"], "weaknesses": ["w1"], "opportunities": ["o1"], "threats": ["t1"]}}]
+                },
+                "financialMetrics": { "burnRate": "val", "quickRatio": "val", "debtToEquity": "val" },
+                "survivalProbabilities": { "days15": 90, "days30": 80, "days60": 70 },
+                "businessIdeas": [{"name": "n1", "investment": "v1", "profit": "p1"}]
+            }`;
 
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: promptText,
-                config: {
-                    responseMimeType: "application/json"
-                }
+            const response = await fetch(OPENROUTER_API_URL, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${process.env.API_KEY}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": window.location.origin,
+                    "X-Title": "Ventura AI"
+                },
+                body: JSON.stringify({
+                    "model": AI_MODEL,
+                    "messages": [
+                        { "role": "system", "content": "You are a helpful business analytics AI. Output ONLY JSON." },
+                        { "role": "user", "content": promptText }
+                    ]
+                })
             });
-            
-            const responseText = response.text;
 
-            if (responseText) {
-                const parsedData = JSON.parse(responseText);
+            if (!response.ok) {
+                throw new Error(`API Error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            const rawContent = data.choices[0]?.message?.content || "";
+            const cleanContent = cleanJsonString(rawContent);
+
+            if (cleanContent) {
+                const parsedData = JSON.parse(cleanContent);
                 
                 // Merge with default to ensure no missing keys
                 setAiData({
@@ -394,7 +427,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
                     marketAnalysis: { ...DEFAULT_AI_DATA.marketAnalysis, ...parsedData.marketAnalysis }
                 });
             } else {
-                throw new Error("Invalid JSON format");
+                throw new Error("Empty response from AI");
             }
 
         } catch (error) {
@@ -432,30 +465,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
         try {
             if (!process.env.API_KEY) throw new Error("API Key missing");
 
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            
-            const history = chatHistory.map(msg => ({
-                role: msg.role,
-                parts: [{ text: msg.text }]
-            }));
+            // Prepare history for API
+            const messages = [
+                { "role": "system", "content": "You are Ventura AI, a business mentor. Keep answers short, practical, and direct." },
+                ...chatHistory.map(msg => ({
+                    role: msg.role === 'model' ? 'assistant' : 'user', // Map model->assistant for standard APIs
+                    content: msg.text
+                })),
+                { "role": "user", "content": userMessage }
+            ];
 
-            const chat = ai.chats.create({
-                model: 'gemini-2.5-flash',
-                history: history,
-                config: {
-                    systemInstruction: "You are Ventura AI, a business mentor. Keep answers short and practical."
-                }
+            const response = await fetch(OPENROUTER_API_URL, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${process.env.API_KEY}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": window.location.origin,
+                    "X-Title": "Ventura AI"
+                },
+                body: JSON.stringify({
+                    "model": AI_MODEL,
+                    "messages": messages
+                })
             });
 
-            const result = await chat.sendMessage({ message: userMessage });
-            const responseText = result.text;
+            if (!response.ok) {
+                throw new Error("Chat API Error");
+            }
+
+            const data = await response.json();
+            const responseText = data.choices[0]?.message?.content;
             
             if (responseText) {
                 setChatHistory(prev => [...prev, { role: 'model', text: responseText }]);
             }
         } catch (e) {
             // Chat Fallback
-            setChatHistory(prev => [...prev, { role: 'model', text: "I'm currently operating in offline mode. based on your profile, I recommend focusing on cash flow stability and customer retention while I reconnect to the main servers." }]);
+            setChatHistory(prev => [...prev, { role: 'model', text: "I'm currently operating in offline mode. Based on your profile, I recommend focusing on cash flow stability and customer retention while I reconnect to the main servers." }]);
         } finally {
             setChatLoading(false);
         }
@@ -521,6 +567,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
 
             {/* MAIN CONTENT */}
             <main className={`flex-1 font-sans transition-all duration-300 flex flex-col h-full relative ${view === 'mentor' ? 'bg-white' : 'bg-[#F9F8F4]'}`}>
+                
+                {isKeyMissing && (
+                    <div className="bg-red-500 text-white px-4 py-2 text-center text-sm font-medium z-50">
+                        Configuration Error: OpenRouter API Key is missing. Please add VITE_API_KEY to your deployment environment variables and redeploy.
+                    </div>
+                )}
                 
                 {view !== 'mentor' && (
                     <header className="flex justify-between items-center p-6 md:p-8 shrink-0">
