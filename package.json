@@ -15,7 +15,8 @@
     "lucide-react": "^0.292.0",
     "@react-three/fiber": "^8.15.11",
     "@react-three/drei": "^9.88.16",
-    "three": "^0.158.0"
+    "three": "^0.158.0",
+    "@google/genai": "^0.1.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.37",
