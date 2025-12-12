@@ -12,10 +12,10 @@ import {
     ChevronLeft, ChevronDown, Info, Activity, DollarSign, LogOut, ArrowRight, RefreshCw, WifiOff
 } from 'lucide-react';
 import { BusinessHealthDiagram, SurvivalChartDiagram } from './Diagrams';
+import { GoogleGenAI } from "@google/genai";
 
 // --- Configuration ---
-const OPENROUTER_API_KEY = "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";
-const AI_MODEL = "mistralai/mistral-7b-instruct:free";
+// API Key is managed via process.env.API_KEY as per GenAI guidelines.
 
 // --- Types ---
 interface DashboardProps {
@@ -324,38 +324,6 @@ const InteractiveTrend = ({ trend, insight }: { trend: string, insight: string }
     );
 };
 
-// --- OpenRouter Helper ---
-const callOpenRouter = async (messages: any[], temperature: number = 0.7) => {
-    try {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-                "HTTP-Referer": "https://ventura.ai",
-                "X-Title": "Ventura AI",
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                "model": AI_MODEL,
-                "messages": messages,
-                "temperature": temperature,
-                "top_p": 0.9,
-                "max_tokens": 1024 // Reduced max tokens for stability
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`API Error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        return data.choices?.[0]?.message?.content || "";
-    } catch (error) {
-        console.warn("OpenRouter API call failed (using fallback):", error);
-        throw error;
-    }
-};
-
 // --- MAIN DASHBOARD COMPONENT ---
 export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogout }) => {
     const [view, setView] = useState<'overview' | 'strategy' | 'mentor'>('overview');
@@ -376,15 +344,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
         try {
             setStatusText("Aggregating Financial & Market Vectors...");
             
-            // Simplified prompt structure for Mistral
-            const prompt = [
-                {
-                    role: "system",
-                    content: "You are a JSON generator. Output valid JSON only. No markdown. No intro."
-                },
-                {
-                    role: "user",
-                    content: `Generate a business analysis JSON for a ${userType === 'running' ? 'Running Business' : 'Startup Idea'}.
+            // Simplified prompt structure for Gemini
+            const promptText = `Generate a business analysis JSON for a ${userType === 'running' ? 'Running Business' : 'Startup Idea'}.
                     
                     Data: ${JSON.stringify(userData)}
 
@@ -405,19 +366,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
                         "financialMetrics": { "burnRate": "val", "quickRatio": "val", "debtToEquity": "val" },
                         "survivalProbabilities": { "days15": 90, "days30": 80, "days60": 70 },
                         "businessIdeas": [{"name": "n1", "investment": "v1", "profit": "p1"}]
-                    }`
-                }
-            ];
+                    }`;
 
-            const responseText = await callOpenRouter(prompt, 0.3);
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: promptText,
+                config: {
+                    responseMimeType: "application/json"
+                }
+            });
             
-            // Extract JSON from response (finding first { and last })
-            const firstBrace = responseText.indexOf('{');
-            const lastBrace = responseText.lastIndexOf('}');
-            
-            if (firstBrace !== -1 && lastBrace !== -1) {
-                const cleanJson = responseText.substring(firstBrace, lastBrace + 1);
-                const parsedData = JSON.parse(cleanJson);
+            const responseText = response.text;
+
+            if (responseText) {
+                const parsedData = JSON.parse(responseText);
                 
                 // Merge with default to ensure no missing keys
                 setAiData({
@@ -430,8 +393,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
             }
 
         } catch (error) {
-            console.warn("Generating fallback analysis due to error:", error);
-            // FAIL-SAFE: Generate local data if API fails
+            console.warn("Switching to Offline Analysis Mode");
+            // FAIL-SAFE: Generate local data if API fails or key is missing
             const fallback = generateFallbackData(userData, userType);
             setAiData(fallback);
             setUsingFallback(true);
@@ -462,16 +425,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
         setChatLoading(true);
 
         try {
-            const messages = [
-                { 
-                    role: "system", 
-                    content: "You are Ventura AI, a business mentor. Keep answers short and practical." 
-                },
-                ...chatHistory.slice(-4).map(msg => ({ role: msg.role === 'model' ? 'assistant' : 'user', content: msg.text })),
-                { role: "user", content: userMessage }
-            ];
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            
+            const history = chatHistory.map(msg => ({
+                role: msg.role,
+                parts: [{ text: msg.text }]
+            }));
 
-            const responseText = await callOpenRouter(messages, 0.7);
+            const chat = ai.chats.create({
+                model: 'gemini-2.5-flash',
+                history: history,
+                config: {
+                    systemInstruction: "You are Ventura AI, a business mentor. Keep answers short and practical."
+                }
+            });
+
+            const result = await chat.sendMessage({ message: userMessage });
+            const responseText = result.text;
             
             if (responseText) {
                 setChatHistory(prev => [...prev, { role: 'model', text: responseText }]);
