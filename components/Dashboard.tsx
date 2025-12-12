@@ -9,7 +9,8 @@ import {
     LayoutDashboard, Target, MessageSquare, TrendingUp, AlertTriangle, 
     CheckCircle, Wallet, BrainCircuit, ChevronRight, Play, Send, User, Sparkles, Check, Globe,
     Plus, Clock, ArrowUp, PanelLeft, Share, ShieldAlert, Trash2, Search, BarChart3, Coins, Rocket,
-    ChevronLeft, ChevronDown, Info, Activity, DollarSign, LogOut, ArrowRight, RefreshCw, WifiOff, XCircle
+    ChevronLeft, ChevronDown, Info, Activity, DollarSign, LogOut, ArrowRight, RefreshCw, WifiOff, XCircle,
+    Calculator, Percent
 } from 'lucide-react';
 import { BusinessHealthDiagram, SurvivalChartDiagram } from './Diagrams';
 
@@ -27,6 +28,13 @@ interface DashboardProps {
     onLogout: () => void;
 }
 
+interface Competitor {
+    name: string;
+    domain: string;
+    logo: string;
+    source: 'external_api' | 'ai_knowledge';
+}
+
 interface AIAnalysisResult {
     healthScore: number;
     financialRisk: number;
@@ -41,16 +49,17 @@ interface AIAnalysisResult {
     survivalProbabilities: { days15: number; days30: number; days60: number };
     warnings: string[];
     improvements: string[];
-    pricingStrategy: string;
+    pricingStrategy: {
+        strategyName: string;
+        description: string;
+        recommendedMargin: number; // Percentage (e.g., 0.40 for 40%)
+    };
     marketingStrategy: string[];
     dailyTasks: string[];
     marketAnalysis: {
         marketSize: string;
+        searchQuery: string; // Used to query external API
         growthTrends: Array<{ trend: string; insight: string }>;
-        keyCompetitors: Array<{ 
-            name: string; 
-            swot: { strengths: string[]; weaknesses: string[]; opportunities: string[]; threats: string[] } 
-        }>;
     };
     businessIdeas?: Array<{ name: string; investment: string; profit: string }>;
 }
@@ -65,13 +74,13 @@ const DEFAULT_AI_DATA: AIAnalysisResult = {
     survivalProbabilities: { days15: 50, days30: 50, days60: 50 },
     warnings: ["System initializing..."],
     improvements: ["Analyzing data..."],
-    pricingStrategy: "Calculating...",
+    pricingStrategy: { strategyName: "Calculating...", description: "Analyzing market...", recommendedMargin: 0.3 },
     marketingStrategy: [],
     dailyTasks: [],
     marketAnalysis: {
         marketSize: "--",
+        searchQuery: "",
         growthTrends: [],
-        keyCompetitors: []
     },
     businessIdeas: []
 };
@@ -143,6 +152,28 @@ const generateFallbackData = (data: Record<string, string>, type: 'idea' | 'runn
             debtToEquity: "0.5"
         }
     };
+};
+
+// --- External API Helper: Fetch Competitors ---
+const fetchExternalCompetitors = async (query: string): Promise<Competitor[]> => {
+    if (!query || query.length < 3) return [];
+    
+    try {
+        // Using Clearbit Autocomplete API (Public, No Auth required for basic autocomplete)
+        const response = await fetch(`https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(query)}`);
+        if (!response.ok) return [];
+        
+        const data = await response.json();
+        return data.map((item: any) => ({
+            name: item.name,
+            domain: item.domain,
+            logo: item.logo,
+            source: 'external_api'
+        })).slice(0, 4); // Limit to top 4
+    } catch (e) {
+        console.warn("External Competitor Fetch Failed", e);
+        return [];
+    }
 };
 
 // --- Helper Components ---
@@ -235,52 +266,75 @@ const WarningCarousel = ({ warnings }: { warnings: string[] }) => {
     );
 };
 
-const CompetitorSwotCard = ({ competitor }: { competitor: { name: string, swot: any } }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const safeSwot = competitor?.swot || { strengths: [], weaknesses: [], opportunities: [], threats: [] };
+const PricingSimulator = ({ recommendedMargin, strategyName }: { recommendedMargin: number, strategyName: string }) => {
+    const [unitCost, setUnitCost] = useState<string>("10.00");
+    const [margin, setMargin] = useState<number>(recommendedMargin * 100);
+
+    const costNum = parseFloat(unitCost) || 0;
+    // Price = Cost / (1 - Margin%)
+    // e.g. Cost 10, Margin 50% (.5) -> 10 / 0.5 = 20.
+    const calculatedPrice = margin < 100 ? costNum / (1 - (margin / 100)) : 0;
+    const profit = calculatedPrice - costNum;
 
     return (
-        <motion.div 
-            layout
-            className={`bg-stone-800/50 rounded-lg overflow-hidden border border-white/10 ${isOpen ? 'bg-stone-800' : 'hover:bg-stone-800/80'} transition-colors cursor-pointer`}
-        >
-            <div onClick={() => setIsOpen(!isOpen)} className="p-4 flex items-center justify-between">
-                <span className="font-serif text-lg text-white">{competitor.name}</span>
-                <motion.div animate={{ rotate: isOpen ? 180 : 0 }}>
-                    <ChevronDown className="text-stone-400" size={20} />
-                </motion.div>
+        <div className="lg:col-span-2 bg-stone-900 text-white p-8 rounded-2xl shadow-xl relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Wallet size={180} />
             </div>
-            
-            <AnimatePresence>
-                {isOpen && (
-                    <motion.div 
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="px-4 pb-4 border-t border-white/10"
-                    >
-                        <div className="grid grid-cols-2 gap-4 pt-4 text-sm">
-                            <div>
-                                <div className="text-emerald-400 text-xs font-bold uppercase mb-1">Strengths</div>
-                                <ul className="list-disc list-inside text-stone-300 space-y-1">{safeSwot.strengths?.slice(0,2).map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
-                            </div>
-                            <div>
-                                <div className="text-red-400 text-xs font-bold uppercase mb-1">Weaknesses</div>
-                                <ul className="list-disc list-inside text-stone-300 space-y-1">{safeSwot.weaknesses?.slice(0,2).map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
-                            </div>
-                            <div>
-                                <div className="text-blue-400 text-xs font-bold uppercase mb-1">Opportunities</div>
-                                <ul className="list-disc list-inside text-stone-300 space-y-1">{safeSwot.opportunities?.slice(0,2).map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
-                            </div>
-                            <div>
-                                <div className="text-amber-400 text-xs font-bold uppercase mb-1">Threats</div>
-                                <ul className="list-disc list-inside text-stone-300 space-y-1">{safeSwot.threats?.slice(0,2).map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+            <div className="relative z-10 flex flex-col md:flex-row gap-8">
+                <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="p-2 bg-nobel-gold rounded-lg text-stone-900">
+                            <Calculator size={24} />
+                        </div>
+                        <h3 className="font-serif text-2xl text-nobel-gold">Pricing Simulator</h3>
+                    </div>
+                    <p className="text-stone-300 font-light mb-6">
+                        Based on your <strong>{strategyName}</strong> strategy, we recommend a margin of <strong>{(recommendedMargin * 100).toFixed(0)}%</strong>.
+                    </p>
+                    
+                    <div className="space-y-6">
+                        <div>
+                            <label className="text-xs font-bold uppercase tracking-widest text-stone-500 mb-2 block">Unit Cost (COGS)</label>
+                            <div className="flex items-center bg-white/10 rounded-lg overflow-hidden border border-white/10 focus-within:border-nobel-gold transition-colors">
+                                <span className="pl-4 text-stone-400">$</span>
+                                <input 
+                                    type="number" 
+                                    value={unitCost}
+                                    onChange={(e) => setUnitCost(e.target.value)}
+                                    className="bg-transparent border-none text-white p-3 focus:ring-0 w-full outline-none font-mono"
+                                />
                             </div>
                         </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </motion.div>
+                        
+                        <div>
+                            <div className="flex justify-between mb-2">
+                                <label className="text-xs font-bold uppercase tracking-widest text-stone-500">Target Margin</label>
+                                <span className="text-nobel-gold font-mono">{margin}%</span>
+                            </div>
+                            <input 
+                                type="range" 
+                                min="1" 
+                                max="90" 
+                                value={margin}
+                                onChange={(e) => setMargin(Number(e.target.value))}
+                                className="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer accent-nobel-gold"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex-1 flex flex-col justify-center bg-white/5 rounded-xl p-6 border border-white/5">
+                    <div className="text-center">
+                        <div className="text-stone-400 text-sm mb-2 uppercase tracking-widest">Recommended Price</div>
+                        <div className="text-5xl font-serif text-white mb-2">${calculatedPrice.toFixed(2)}</div>
+                        <div className="inline-block px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-full text-xs font-mono">
+                            +${profit.toFixed(2)} Profit / Unit
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     );
 };
 
@@ -325,6 +379,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
     const [statusText, setStatusText] = useState("Initializing AI Core...");
     const [lastError, setLastError] = useState<string | null>(null);
     const [aiData, setAiData] = useState<AIAnalysisResult | null>(null);
+    const [competitors, setCompetitors] = useState<Competitor[]>([]);
     const [chatHistory, setChatHistory] = useState<{role: 'user' | 'model', text: string}[]>([]);
     const [chatInput, setChatInput] = useState("");
     const [chatLoading, setChatLoading] = useState(false);
@@ -335,6 +390,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
         setLoading(true);
         setUsingFallback(false);
         setLastError(null);
+        setCompetitors([]);
         
         const processedData = preprocessData(userData);
         
@@ -420,6 +476,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
             2. Set "financialRisk" strictly between ${riskMin} and ${riskMax}.
             3. "financialMetrics.burnRate" MUST be exactly: "${burnRateDisplay}".
             4. If Runway < 3 months, "survivalProbabilities.days60" MUST be less than 40%.
+            5. In "marketAnalysis.searchQuery", provide a short, specific string to find REAL competitors via an API (e.g. "Coffee Shop Seattle", "SaaS CRM").
             
             REQUIRED JSON STRUCTURE:
             {
@@ -430,13 +487,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
                 "efficiencyRisk": number (0-100),
                 "warnings": [string, string],
                 "improvements": [string, string],
-                "pricingStrategy": string,
+                "pricingStrategy": {
+                    "strategyName": string, 
+                    "description": string,
+                    "recommendedMargin": number (decimal 0.1 to 0.9)
+                },
                 "marketingStrategy": [string, string],
                 "dailyTasks": [string, string],
                 "marketAnalysis": {
                     "marketSize": string,
-                    "growthTrends": [{"trend": string, "insight": string}],
-                    "keyCompetitors": [{"name": string, "swot": {"strengths": [], "weaknesses": [], "opportunities": [], "threats": []}}]
+                    "searchQuery": string,
+                    "growthTrends": [{"trend": string, "insight": string}]
                 },
                 "financialMetrics": { "burnRate": string, "quickRatio": string, "debtToEquity": string },
                 "survivalProbabilities": { "days15": number, "days30": number, "days60": number },
@@ -487,6 +548,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
                 ...parsedData,
                 marketAnalysis: { ...DEFAULT_AI_DATA.marketAnalysis, ...parsedData.marketAnalysis }
             });
+
+            // --- FETCH REAL COMPETITORS ---
+            if (parsedData.marketAnalysis?.searchQuery) {
+                setStatusText(`Scanning external databases for: ${parsedData.marketAnalysis.searchQuery}...`);
+                const realCompetitors = await fetchExternalCompetitors(parsedData.marketAnalysis.searchQuery);
+                setCompetitors(realCompetitors);
+            }
 
         } catch (error: any) {
             console.error("Cerebras Analysis Error:", error);
@@ -751,11 +819,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
                                                     </div>
                                                     
                                                     <div className="lg:col-span-2">
-                                                        <div className="text-stone-400 text-xs font-bold uppercase tracking-widest mb-4">Competitor Landscape (SWOT Analysis)</div>
-                                                        <div className="space-y-3">
-                                                            {aiData.marketAnalysis.keyCompetitors.map((comp, i) => (
-                                                                <CompetitorSwotCard key={i} competitor={comp} />
-                                                            ))}
+                                                        <div className="text-stone-400 text-xs font-bold uppercase tracking-widest mb-4">Real Competitors (via External API)</div>
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            {competitors.length > 0 ? (
+                                                                competitors.map((comp, i) => (
+                                                                    <a href={`https://${comp.domain}`} target="_blank" rel="noopener noreferrer" key={i} className="flex items-center gap-4 p-4 bg-white/10 rounded-lg border border-white/5 hover:bg-white/20 transition-all group">
+                                                                        <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center overflow-hidden shrink-0">
+                                                                            {comp.logo ? <img src={comp.logo} alt={comp.name} className="w-full h-full object-cover" /> : <div className="text-stone-900 font-bold">{comp.name.charAt(0)}</div>}
+                                                                        </div>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="font-bold text-white truncate">{comp.name}</div>
+                                                                            <div className="text-xs text-stone-400 truncate">{comp.domain}</div>
+                                                                        </div>
+                                                                        <ArrowRight size={16} className="text-stone-500 group-hover:text-nobel-gold transition-colors" />
+                                                                    </a>
+                                                                ))
+                                                            ) : (
+                                                                <div className="col-span-2 p-6 border border-dashed border-white/10 rounded-lg text-center text-stone-500 text-sm">
+                                                                    Could not identify direct competitors via public API for this specific niche. 
+                                                                    <br/> <span className="text-xs opacity-60">Try refining your business industry description.</span>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -829,31 +913,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
                                     >
                                         {/* Header Section with Pricing */}
                                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                             {/* Pricing Strategy - Dark/Premium Card */}
-                                             <div className="lg:col-span-2 bg-stone-900 text-white p-8 rounded-2xl shadow-xl relative overflow-hidden group">
-                                                <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
-                                                    <Wallet size={180} />
-                                                </div>
-                                                <div className="relative z-10">
-                                                    <div className="flex items-center gap-3 mb-6">
-                                                        <div className="p-2 bg-nobel-gold rounded-lg text-stone-900">
-                                                            <DollarSign size={24} />
-                                                        </div>
-                                                        <h3 className="font-serif text-2xl text-nobel-gold">Pricing Intelligence</h3>
-                                                    </div>
-                                                    <p className="text-lg leading-relaxed text-stone-300 font-light">
-                                                        {aiData.pricingStrategy}
-                                                    </p>
-                                                    <div className="mt-8 flex gap-4">
-                                                        <button className="px-4 py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-lg text-sm border border-white/10 transition-colors">
-                                                            Analyze Margins
-                                                        </button>
-                                                         <button className="px-4 py-2 bg-nobel-gold hover:bg-yellow-600 text-stone-900 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-yellow-500/20">
-                                                            Apply Model
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                             </div>
+                                             {/* Pricing Strategy - Interactive Simulator */}
+                                             <PricingSimulator 
+                                                recommendedMargin={aiData.pricingStrategy.recommendedMargin}
+                                                strategyName={aiData.pricingStrategy.strategyName}
+                                             />
 
                                              {/* Quick Actions / Key Metric */}
                                              <div className="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm flex flex-col justify-center items-center text-center">
