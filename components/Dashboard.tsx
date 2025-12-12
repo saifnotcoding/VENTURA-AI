@@ -14,9 +14,23 @@ import {
 import { BusinessHealthDiagram, SurvivalChartDiagram } from './Diagrams';
 
 // --- Configuration ---
-// API Key is managed via process.env.API_KEY (mapped from VITE_API_KEY in vite.config.ts)
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const AI_MODEL = "mistralai/mistral-7b-instruct:free";
+
+// --- Helper: Robust API Key Retrieval ---
+const getApiKey = () => {
+    // 1. Try standard Vite environment variable (most reliable)
+    // @ts-ignore - import.meta is available in Vite
+    if (import.meta.env && import.meta.env.VITE_API_KEY) {
+        // @ts-ignore
+        return import.meta.env.VITE_API_KEY;
+    }
+    // 2. Try process.env polyfill (from vite.config.ts)
+    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+        return process.env.API_KEY;
+    }
+    return "";
+};
 
 // --- Types ---
 interface DashboardProps {
@@ -360,8 +374,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
         setIsKeyMissing(false);
         
         try {
-            if (!process.env.API_KEY) {
-                console.warn("API Key missing from build environment. Triggering Offline Mode.");
+            const apiKey = getApiKey();
+
+            if (!apiKey) {
+                console.warn("API Key missing from environment. Triggering Offline Mode.");
                 setIsKeyMissing(true);
                 throw new Error("API Key missing");
             }
@@ -395,7 +411,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
             const response = await fetch(OPENROUTER_API_URL, {
                 method: "POST",
                 headers: {
-                    "Authorization": `Bearer ${process.env.API_KEY}`,
+                    "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
                     "HTTP-Referer": window.location.origin,
                     "X-Title": "Ventura AI"
@@ -463,7 +479,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
         setChatLoading(true);
 
         try {
-            if (!process.env.API_KEY) throw new Error("API Key missing");
+            const apiKey = getApiKey();
+            if (!apiKey) throw new Error("API Key missing");
 
             // Prepare history for API
             const messages = [
@@ -478,7 +495,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userData, userType, onLogo
             const response = await fetch(OPENROUTER_API_URL, {
                 method: "POST",
                 headers: {
-                    "Authorization": `Bearer ${process.env.API_KEY}`,
+                    "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
                     "HTTP-Referer": window.location.origin,
                     "X-Title": "Ventura AI"
